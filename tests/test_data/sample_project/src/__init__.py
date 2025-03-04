@@ -1,0 +1,1 @@
+"""Sample project for testing code graph analysis."""

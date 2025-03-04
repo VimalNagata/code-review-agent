@@ -67,7 +67,8 @@ class CodeReviewAgent:
             
     def analyze_code(self, repo_path):
         """
-        Analyze the code in the repository using the local model.
+        Analyze the code in the repository using comprehensive code graph analysis
+        and the local model.
         
         Args:
             repo_path: Path to the repository
@@ -77,20 +78,92 @@ class CodeReviewAgent:
         """
         logger.info(f"Analyzing code in {repo_path}")
         
-        # This is where you would load and use your local model
-        # For now, we'll just do a simple file scan
-        if not self.model_path:
-            logger.warning("No model specified, performing basic file analysis")
-            return self._basic_file_analysis(repo_path)
+        # Try to use codebase analyzer for comprehensive analysis
+        try:
+            from src.codebase_analyzer import CodebaseAnalyzer
+            from src.code_graph import CodeGraph
+            
+            logger.info("Using CodebaseAnalyzer for comprehensive code analysis")
+            analyzer = CodebaseAnalyzer(repo_path, self.output_dir)
+            
+            # Build the code graph
+            logger.info("Building and analyzing code graph...")
+            analyzer.build_code_graph()
+            analysis_results = analyzer.analyze_codebase()
+            
+            # Generate reports
+            try:
+                logger.info("Generating analysis reports...")
+                html_report = analyzer.generate_html_report()
+                json_report = analyzer.export_json()
+                logger.info(f"Analysis reports generated at {html_report} and {json_report}")
+            except Exception as e:
+                logger.error(f"Failed to generate analysis reports: {e}")
+            
+            # Combine with model-based analysis if available
+            if self.model_path:
+                logger.info(f"Enhancing analysis with model at {self.model_path}")
+                
+                # Get model-based analysis
+                model_analysis = self._get_model_analysis(repo_path)
+                
+                # Combine results
+                combined_results = {
+                    "summary": "Combined graph-based and model-based analysis",
+                    "graph_analysis": analysis_results,
+                    "model_analysis": model_analysis,
+                    "files_analyzed": analysis_results.get("stats", {}).get("total_files", 0),
+                    "recommendations": analysis_results.get("insights", []) + 
+                                      model_analysis.get("recommendations", [])
+                }
+                
+                return combined_results
+            
+            # No model, just return graph analysis
+            return {
+                "summary": "Graph-based code analysis",
+                "graph_analysis": analysis_results,
+                "files_analyzed": analysis_results.get("stats", {}).get("total_files", 0),
+                "recommendations": analysis_results.get("insights", [])
+            }
+            
+        except ImportError as e:
+            logger.warning(f"CodebaseAnalyzer not available: {e}")
+            
+            # Fall back to basic or model-based analysis
+            if not self.model_path:
+                logger.warning("No model specified, performing basic file analysis")
+                return self._basic_file_analysis(repo_path)
+            else:
+                return self._get_model_analysis(repo_path)
+        except Exception as e:
+            logger.error(f"Error in comprehensive analysis: {e}")
+            logger.info("Falling back to basic analysis")
+            
+            # Fall back to basic or model-based analysis
+            if not self.model_path:
+                return self._basic_file_analysis(repo_path)
+            else:
+                return self._get_model_analysis(repo_path)
+                
+    def _get_model_analysis(self, repo_path):
+        """Get model-based analysis."""
+        logger.info(f"Using model at {self.model_path} for analysis")
         
-        # Mock model analysis for now
-        logger.info(f"Using model at {self.model_path} to analyze code")
-        return {
-            "summary": "Model-based code analysis would go here",
-            "files_analyzed": self._count_files(repo_path),
-            "recommendations": ["Use more descriptive variable names", 
-                               "Add more documentation"]
-        }
+        try:
+            from src.model_integration import ModelIntegration
+            model = ModelIntegration(self.model_path)
+            return model.analyze_repository(repo_path)
+        except Exception as e:
+            logger.error(f"Error in model-based analysis: {e}")
+            
+            # Fallback to mock analysis
+            return {
+                "summary": "Mock model-based code analysis",
+                "files_analyzed": self._count_files(repo_path),
+                "recommendations": ["Use more descriptive variable names", 
+                                   "Add more documentation"]
+            }
     
     def _basic_file_analysis(self, repo_path):
         """Basic file analysis without a model."""

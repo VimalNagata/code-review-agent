@@ -7,6 +7,14 @@ import unittest
 from unittest.mock import patch, MagicMock
 from src.agent import CodeReviewAgent
 
+# Import for testing new functionality
+try:
+    from src.code_graph import CodeGraph
+    from src.codebase_analyzer import CodebaseAnalyzer
+    GRAPH_MODULES_AVAILABLE = True
+except ImportError:
+    GRAPH_MODULES_AVAILABLE = False
+
 class TestCodeReviewAgent(unittest.TestCase):
     """Tests for the CodeReviewAgent class."""
     
@@ -112,6 +120,34 @@ class TestCodeReviewAgent(unittest.TestCase):
         
         # Check that the analysis file was created
         self.assertTrue(os.path.exists(results["analysis_file"]))
+
+    @unittest.skipIf(not GRAPH_MODULES_AVAILABLE, "Code graph modules not available")
+    @patch('src.codebase_analyzer.CodebaseAnalyzer')
+    def test_analyze_code_with_graph(self, mock_analyzer):
+        """Test code analysis with comprehensive graph analysis."""
+        # Setup mocks
+        mock_instance = mock_analyzer.return_value
+        mock_instance.build_code_graph.return_value = MagicMock()
+        mock_instance.analyze_codebase.return_value = {
+            "stats": {"total_files": 10},
+            "insights": ["Key insight 1", "Key insight 2"]
+        }
+        mock_instance.generate_html_report.return_value = "report.html"
+        mock_instance.export_json.return_value = "report.json"
+        
+        # Test
+        repo_path = os.path.join(self.temp_dir, "graph_repo")
+        os.makedirs(repo_path, exist_ok=True)
+        result = self.agent.analyze_code(repo_path)
+        
+        # Verify
+        mock_analyzer.assert_called_once()
+        mock_instance.build_code_graph.assert_called_once()
+        mock_instance.analyze_codebase.assert_called_once()
+        
+        # Check results - exact structure depends on implementation
+        self.assertIn("graph_analysis", result)
+        self.assertIn("recommendations", result)
 
 if __name__ == '__main__':
     unittest.main()

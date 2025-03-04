@@ -1,17 +1,22 @@
 # Code Review and Integration Test Agent
 
-An agent that downloads a git repository, reviews the code using a locally downloaded LLM, and generates integration test cases for Python, JavaScript, and Java codebases.
+An agent that downloads a git repository, reviews the code using a locally downloaded LLM, builds a comprehensive code graph, and generates integration test cases for Python, JavaScript, and Java codebases.
 
 ## Features
 
 - Downloads and analyzes git repositories
-- Uses StarCoder or other local LLMs for code review
+- Builds a comprehensive code graph for deep structural analysis:
+  - Maps files, classes, functions, and methods
+  - Tracks import dependencies and inheritance relationships
+  - Identifies key central components and circular dependencies
+  - Generates visual dependency graphs and insightful reports
+- Uses CodeLlama or other local LLMs for enhanced code review
 - Generates language-specific integration tests:
   - Python tests using pytest
   - JavaScript tests using Jest
   - Java tests using JUnit 5 and Mockito
 - Provides detailed code recommendations and test suggestions
-- Creates comprehensive summary reports
+- Creates comprehensive summary reports with visualizations
 
 ## Installation
 
@@ -77,6 +82,8 @@ See `model/DOWNLOAD_INSTRUCTIONS.md` for more details.
 ## Components
 
 - **CodeReviewAgent**: Main agent that coordinates repository analysis and test generation
+- **CodeGraph**: Core data structure representing the codebase as a graph
+- **CodebaseAnalyzer**: Builds and analyzes code graphs to derive insights
 - **ModelIntegration**: Integrates with local LLMs for code analysis and test suggestions
 - **TestGenerator**: Generates language-specific integration tests
 
@@ -84,10 +91,13 @@ See `model/DOWNLOAD_INSTRUCTIONS.md` for more details.
 
 The agent generates:
 
+- Interactive HTML reports with code dependency visualizations
+- Comprehensive code structure analysis with insights
+- Identification of central files and circular dependencies
 - Summary report in Markdown format
-- Detailed code analysis
+- Detailed code recommendations
 - Language-specific integration tests
-- Test recommendations based on code patterns
+- Test recommendations based on code patterns and structure
 
 ## Testing
 
