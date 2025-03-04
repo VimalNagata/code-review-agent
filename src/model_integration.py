@@ -20,6 +20,7 @@ class ModelIntegration:
         """
         self.model_path = model_path
         self._model = None
+        self._model_type = None  # 'hf' for HuggingFace, 'llama_cpp' for llama.cpp
         
         # Check if model exists
         if not os.path.exists(model_path):
@@ -35,18 +36,32 @@ class ModelIntegration:
             True if model loaded successfully, False otherwise
         """
         try:
-            logger.info(f"Loading StarCoder model from {self.model_path}")
+            # Check if we have a GGUF file (for llama.cpp)
+            gguf_files = list(Path(self.model_path).glob("*.gguf"))
+            if gguf_files:
+                return self._load_llama_cpp_model(gguf_files[0])
+            else:
+                return self._load_transformers_model()
+                
+        except Exception as e:
+            logger.error(f"Failed to load model: {e}")
+            return False
+            
+    def _load_transformers_model(self):
+        """Load model using HuggingFace Transformers."""
+        try:
+            logger.info(f"Loading HuggingFace model from {self.model_path}")
             # Import here to avoid requiring transformers when not using a model
             from transformers import AutoModelForCausalLM, AutoTokenizer
             
-            # Load the StarCoder tokenizer
+            # Load the tokenizer
             logger.info("Loading tokenizer...")
             self._tokenizer = AutoTokenizer.from_pretrained(
                 self.model_path,
                 trust_remote_code=True
             )
             
-            # Load the StarCoder model
+            # Load the model
             logger.info("Loading model (this may take a while)...")
             self._model = AutoModelForCausalLM.from_pretrained(
                 self.model_path,
@@ -54,11 +69,55 @@ class ModelIntegration:
                 device_map="auto"  # Automatically use available GPUs/CPUs
             )
             
-            logger.info("StarCoder model loaded successfully")
+            self._model_type = 'hf'
+            logger.info("HuggingFace model loaded successfully")
             return True
         except Exception as e:
-            logger.error(f"Failed to load model: {e}")
+            logger.error(f"Failed to load HuggingFace model: {e}")
             logger.error("Make sure you have the transformers library installed: pip install transformers")
+            return False
+            
+    def _load_llama_cpp_model(self, model_path):
+        """Load model using llama.cpp Python bindings."""
+        try:
+            logger.info(f"Loading llama.cpp model from {model_path}")
+            try:
+                from llama_cpp import Llama
+            except ImportError:
+                logger.error("llama-cpp-python not installed")
+                logger.error("Please install it: pip install llama-cpp-python")
+                return False
+                
+            # Load the model
+            logger.info("Loading model (this may take a while)...")
+            self._model = Llama(
+                model_path=str(model_path),
+                n_ctx=4096,  # Context window size
+                n_threads=os.cpu_count(),  # Use all CPU cores
+                verbose=False
+            )
+            
+            # Create a simple tokenizer for llama-cpp that mimics HF tokenizer interface
+            class LlamaCppTokenizer:
+                def __init__(self, llama_model):
+                    self.llama_model = llama_model
+                    
+                def __call__(self, text, return_tensors=None):
+                    # For llama-cpp, we don't need to tokenize separately
+                    # Just return the text for later use
+                    return {"input_text": text}
+                
+                def decode(self, token_ids, skip_special_tokens=False):
+                    # For llama-cpp, we don't need to decode
+                    # This will only be called with text output from the model
+                    return token_ids
+            
+            self._tokenizer = LlamaCppTokenizer(self._model)
+            self._model_type = 'llama_cpp'
+            logger.info("llama.cpp model loaded successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load llama.cpp model: {e}")
             return False
             
     def analyze_file(self, file_path):
@@ -87,22 +146,23 @@ class ModelIntegration:
                 "filename": Path(file_path).name
             }
             
-            # Check if we have a real model or are using the mock
-            if hasattr(self._model, 'generate'):
-                logger.info(f"Analyzing {file_path} using StarCoder model")
-                
-                # Prepare the prompt for code analysis
-                prompt = f"""
-                Analyze the following code and provide recommendations for improvement:
-                
-                ```{file_stats['file_type']}
-                {content[:2000]}  # Limit to first 2000 chars to fit in context window
-                ```
-                
-                Provide recommendations in the following format:
-                1. [Issue]: [Description]
-                2. [Issue]: [Description]
-                """
+            # Prepare the prompt for code analysis
+            prompt = f"""
+            Analyze the following code and provide recommendations for improvement:
+            
+            ```{file_stats['file_type']}
+            {content[:2000]}  # Limit to first 2000 chars to fit in context window
+            ```
+            
+            Provide recommendations in the following format:
+            1. [Issue]: [Description]
+            2. [Issue]: [Description]
+            """
+            
+            # Check which model type to use
+            if self._model_type == 'hf':
+                # HuggingFace model
+                logger.info(f"Analyzing {file_path} using HuggingFace model")
                 
                 # Tokenize the prompt
                 inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
@@ -121,35 +181,55 @@ class ModelIntegration:
                 # Decode the generated text
                 generated_text = self._tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
                 
-                # Extract recommendations from generated text
-                recommendations = []
-                for line in generated_text.strip().split('\n'):
-                    if line.strip().startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')):
-                        recommendations.append(line.strip())
+            elif self._model_type == 'llama_cpp':
+                # llama.cpp model
+                logger.info(f"Analyzing {file_path} using llama.cpp model")
                 
-                # If no numbered recommendations were found, use the whole text
-                if not recommendations:
-                    recommendations = [line for line in generated_text.strip().split('\n') if line.strip()]
+                # Generate the analysis using llama-cpp's API
+                result = self._model.create_completion(
+                    prompt.strip(),
+                    max_tokens=500,
+                    temperature=0.7,
+                    top_p=0.95,
+                    stop=["```"],
+                    echo=False
+                )
                 
-                # Add common recommendations based on file type
-                recommendations.extend(self._get_file_type_recommendations(file_stats["file_type"]))
-                    
-                analysis = {
-                    "file": str(file_path),
-                    "stats": file_stats,
-                    "model_analysis": generated_text.strip(),
-                    "recommendations": recommendations
-                }
+                # Extract the generated text
+                generated_text = result['choices'][0]['text']
+                
             else:
-                # Fallback to mock analysis if no real model is available
-                logger.info(f"Using mock analysis for {file_path}")
+                # Fallback to mock analysis
+                logger.info(f"Using mock analysis for {file_path} (no model available)")
                 analysis = {
                     "file": str(file_path),
                     "stats": file_stats,
                     "recommendations": self._mock_recommendations(file_stats["file_type"])
                 }
+                return analysis
+                
+            # Extract recommendations from generated text
+            recommendations = []
+            for line in generated_text.strip().split('\n'):
+                if line.strip().startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')):
+                    recommendations.append(line.strip())
+            
+            # If no numbered recommendations were found, use the whole text
+            if not recommendations:
+                recommendations = [line for line in generated_text.strip().split('\n') if line.strip()]
+            
+            # Add common recommendations based on file type
+            recommendations.extend(self._get_file_type_recommendations(file_stats["file_type"]))
+                
+            analysis = {
+                "file": str(file_path),
+                "stats": file_stats,
+                "model_analysis": generated_text.strip(),
+                "recommendations": recommendations
+            }
             
             return analysis
+            
         except Exception as e:
             logger.error(f"Error analyzing file {file_path}: {e}")
             return {"error": str(e), "file": str(file_path)}
@@ -299,9 +379,9 @@ class ModelIntegration:
         file_analyses = analysis_results.get("file_analyses", [])
         tests = []
         
-        # Check if we have a real model or are using the mock
-        if hasattr(self._model, 'generate'):
-            logger.info("Using StarCoder model to generate test suggestions")
+        # Check which model type we're using
+        if self._model_type in ['hf', 'llama_cpp']:
+            logger.info(f"Using {self._model_type} model to generate test suggestions")
             
             # Process up to 5 files for test generation
             for analysis in file_analyses[:5]:
@@ -330,22 +410,39 @@ class ModelIntegration:
                     3. Test [functionality]: [description]
                     """
                     
-                    # Tokenize the prompt
-                    inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
-                    
-                    # Generate test suggestions
-                    with torch.no_grad():
-                        output_ids = self._model.generate(
-                            inputs["input_ids"],
-                            max_new_tokens=300,
+                    # Generate based on model type
+                    if self._model_type == 'hf':
+                        # HuggingFace model
+                        # Tokenize the prompt
+                        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+                        
+                        # Generate test suggestions
+                        with torch.no_grad():
+                            output_ids = self._model.generate(
+                                inputs["input_ids"],
+                                max_new_tokens=300,
+                                temperature=0.8,
+                                top_p=0.95,
+                                do_sample=True,
+                                pad_token_id=self._tokenizer.eos_token_id
+                            )
+                        
+                        # Decode the generated text
+                        generated_text = self._tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+                        
+                    elif self._model_type == 'llama_cpp':
+                        # llama.cpp model
+                        result = self._model.create_completion(
+                            prompt.strip(),
+                            max_tokens=300,
                             temperature=0.8,
                             top_p=0.95,
-                            do_sample=True,
-                            pad_token_id=self._tokenizer.eos_token_id
+                            stop=["```"],
+                            echo=False
                         )
-                    
-                    # Decode the generated text
-                    generated_text = self._tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+                        
+                        # Extract the generated text
+                        generated_text = result['choices'][0]['text']
                     
                     # Extract test cases from generated text
                     test_cases = []
@@ -408,8 +505,18 @@ class ModelIntegration:
                     }
                     tests.append(test_suggestion)
         
-        # Generate model-specific testing advice if we're using a real model
-        if hasattr(self._model, 'generate'):
+        # Generate model-specific testing advice
+        advice = self._generate_testing_advice(file_analyses)
+                
+        return {
+            "suggested_tests": tests[:5],  # Limit to 5 test suggestions
+            "general_advice": advice
+        }
+        
+    def _generate_testing_advice(self, file_analyses):
+        """Generate testing advice based on the model type."""
+        # Generate advice based on model type
+        if self._model_type == 'hf':
             try:
                 advice_prompt = f"""
                 Based on code analysis of {len(file_analyses)} files, provide 5 best practices 
@@ -441,26 +548,52 @@ class ModelIntegration:
                 # If no dash-prefixed advice found, use whole paragraphs
                 if not advice:
                     advice = [line.strip() for line in advice_text.strip().split('\n') if line.strip()]
-            except Exception as e:
-                logger.error(f"Error generating testing advice: {e}")
-                advice = [
-                    "Focus on testing module boundaries",
-                    "Test error cases and edge cases",
-                    "Consider using mock objects for external dependencies",
-                    "Keep tests independent from each other",
-                    "Test both happy paths and failure scenarios"
-                ]
-        else:
-            # Default advice
-            advice = [
-                "Focus on testing module boundaries",
-                "Test error cases and edge cases",
-                "Consider using mock objects for external dependencies",
-                "Keep tests independent from each other",
-                "Test both happy paths and failure scenarios"
-            ]
                 
-        return {
-            "suggested_tests": tests[:5],  # Limit to 5 test suggestions
-            "general_advice": advice
-        }
+                return advice
+                
+            except Exception as e:
+                logger.error(f"Error generating testing advice with HuggingFace model: {e}")
+                
+        elif self._model_type == 'llama_cpp':
+            try:
+                advice_prompt = f"""
+                Based on code analysis, provide 5 best practices for writing effective integration tests.
+                Format each practice on a new line starting with a dash (-).
+                """
+                
+                # Generate advice
+                result = self._model.create_completion(
+                    advice_prompt.strip(),
+                    max_tokens=200,
+                    temperature=0.7,
+                    top_p=0.95,
+                    stop=["```"],
+                    echo=False
+                )
+                
+                # Extract the generated text
+                advice_text = result['choices'][0]['text']
+                
+                # Extract advice points
+                advice = []
+                for line in advice_text.strip().split('\n'):
+                    if line.strip().startswith('-'):
+                        advice.append(line.strip()[2:].strip())  # Remove dash and space
+                
+                # If no dash-prefixed advice found, use whole paragraphs
+                if not advice:
+                    advice = [line.strip() for line in advice_text.strip().split('\n') if line.strip()]
+                
+                return advice
+                
+            except Exception as e:
+                logger.error(f"Error generating testing advice with llama.cpp model: {e}")
+        
+        # Default advice if model generation fails or no model available
+        return [
+            "Focus on testing module boundaries",
+            "Test error cases and edge cases",
+            "Consider using mock objects for external dependencies",
+            "Keep tests independent from each other",
+            "Test both happy paths and failure scenarios"
+        ]

@@ -33,8 +33,14 @@ pip install -r requirements.txt
 # Basic usage (without model, uses mock analysis)
 python -m src https://github.com/username/repo-to-analyze.git
 
-# With a local model
-python -m src https://github.com/username/repo-to-analyze.git --model ./model
+# Use CodeLlama (automatically downloads if not present)
+python -m src https://github.com/username/repo-to-analyze.git --model codellama
+
+# Download CodeLlama without running analysis
+python -m src https://github.com/username/repo-to-analyze.git --model codellama --download-only
+
+# With a custom local model
+python -m src https://github.com/username/repo-to-analyze.git --model ./my-model-dir
 
 # Specify output directory
 python -m src https://github.com/username/repo-to-analyze.git --output ./my-output-dir
@@ -45,11 +51,28 @@ python -m src https://github.com/username/repo-to-analyze.git -v
 
 ## Model Setup
 
-The agent works best with code-specialized LLMs. See `model/DOWNLOAD_INSTRUCTIONS.md` for details on downloading and setting up:
+The agent supports multiple types of models:
 
-- StarCoder
-- StarCoder2-1B (lighter alternative)
-- Other compatible Hugging Face models
+### 1. CodeLlama (Recommended)
+
+The easiest option is to use the built-in CodeLlama integration:
+
+```bash
+# Automatically downloads and uses CodeLlama
+python -m src https://github.com/username/repo-to-analyze.git --model codellama
+```
+
+This downloads a quantized 7B parameter version of CodeLlama that works well on most machines (requires about 4GB of RAM).
+
+### 2. Other Models
+
+You can also use:
+
+- StarCoder or StarCoder2 (HuggingFace models)
+- Other GGUF models compatible with llama-cpp-python
+- Any model supported by the Transformers library
+
+See `model/DOWNLOAD_INSTRUCTIONS.md` for more details.
 
 ## Components
 

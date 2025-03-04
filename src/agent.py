@@ -303,13 +303,76 @@ if __name__ == '__main__':
             "analysis_results": analysis_results
         }
 
+def download_codellama(model_dir):
+    """Download the CodeLlama model if it doesn't exist."""
+    import os
+    from pathlib import Path
+    
+    model_file = os.path.join(model_dir, "codellama-7b-instruct.Q4_K_M.gguf")
+    if not os.path.exists(model_file):
+        print("CodeLlama model not found. Downloading now (this may take a while)...")
+        
+        # Create the directory if it doesn't exist
+        os.makedirs(model_dir, exist_ok=True)
+        
+        try:
+            # Try to use huggingface_hub if available
+            try:
+                from huggingface_hub import hf_hub_download
+                print("Downloading CodeLlama using HuggingFace Hub...")
+                hf_hub_download(
+                    repo_id="TheBloke/CodeLlama-7B-Instruct-GGUF",
+                    filename="codellama-7b-instruct.Q4_K_M.gguf",
+                    local_dir=model_dir,
+                    local_dir_use_symlinks=False
+                )
+                print(f"Model downloaded to {model_file}")
+                return model_file
+            except ImportError:
+                print("huggingface_hub not installed, trying with requests...")
+                
+            # Fallback to direct download with requests
+            import requests
+            from tqdm import tqdm
+            
+            url = "https://huggingface.co/TheBloke/CodeLlama-7B-Instruct-GGUF/resolve/main/codellama-7b-instruct.Q4_K_M.gguf"
+            print(f"Downloading from {url}...")
+            
+            response = requests.get(url, stream=True)
+            total_size = int(response.headers.get('content-length', 0))
+            block_size = 1024 * 1024  # 1MB
+            
+            with open(model_file, 'wb') as f, tqdm(
+                total=total_size, unit='B', unit_scale=True, desc="Downloading"
+            ) as progress_bar:
+                for data in response.iter_content(block_size):
+                    f.write(data)
+                    progress_bar.update(len(data))
+            
+            print(f"Model downloaded to {model_file}")
+            return model_file
+            
+        except Exception as e:
+            print(f"Error downloading model: {e}")
+            print("Please download the model manually:")
+            print("1. Visit: https://huggingface.co/TheBloke/CodeLlama-7B-Instruct-GGUF")
+            print("2. Download 'codellama-7b-instruct.Q4_K_M.gguf'")
+            print(f"3. Save it to {model_dir}")
+            if input("Continue without model? (y/n): ").lower() != 'y':
+                sys.exit(1)
+            return None
+    else:
+        print(f"CodeLlama model found at {model_file}")
+        return model_file
+
 def main():
     """Main entry point for the agent."""
     parser = argparse.ArgumentParser(description="Code Review and Integration Test Generator")
     parser.add_argument("repo_url", help="URL of the git repository to analyze")
-    parser.add_argument("--model", help="Path to the local model", default=None)
+    parser.add_argument("--model", help="Path to the local model or 'codellama' to use CodeLlama", default=None)
     parser.add_argument("--output", help="Output directory", default=None)
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
+    parser.add_argument("--download-only", action="store_true", help="Only download the model, don't run analysis")
     
     args = parser.parse_args()
     
@@ -319,13 +382,24 @@ def main():
         logger.debug("Verbose mode enabled")
     
     try:
-        print(f"Starting code review and test generation for {args.repo_url}...")
+        # Handle CodeLlama special case
+        if args.model == 'codellama':
+            model_dir = os.path.join(os.getcwd(), "model")
+            model_path = download_codellama(model_dir)
+            
+            if args.download_only:
+                print("Model download complete. Exiting as --download-only was specified.")
+                sys.exit(0)
+                
+            args.model = model_dir
+        else:
+            # Check if model path is valid
+            if args.model and not os.path.exists(args.model):
+                print(f"Warning: Model path {args.model} does not exist.")
+                if input("Continue without model? (y/n): ").lower() != 'y':
+                    sys.exit(1)
         
-        # Check if model path is valid
-        if args.model and not os.path.exists(args.model):
-            print(f"Warning: Model path {args.model} does not exist.")
-            if input("Continue without model? (y/n): ").lower() != 'y':
-                sys.exit(1)
+        print(f"Starting code review and test generation for {args.repo_url}...")
         
         # Create agent and run
         agent = CodeReviewAgent(model_path=args.model, output_dir=args.output)
