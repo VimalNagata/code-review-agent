@@ -137,11 +137,61 @@ class CodeReviewAgent:
         tests_dir = os.path.join(self.output_dir, "integration_tests")
         os.makedirs(tests_dir, exist_ok=True)
         
-        # For now, we'll just create a simple template test file
-        test_file = os.path.join(tests_dir, "test_integration.py")
-        
-        with open(test_file, 'w') as f:
-            f.write("""
+        # Load model integration if available
+        if self.model_path:
+            try:
+                from src.model_integration import ModelIntegration
+                model = ModelIntegration(self.model_path)
+                test_suggestions = model.generate_integration_tests(repo_path, analysis_results)
+                logger.info(f"Generated test suggestions using model: {len(test_suggestions.get('suggested_tests', []))} tests")
+            except Exception as e:
+                logger.error(f"Error generating test suggestions with model: {e}")
+                test_suggestions = None
+        else:
+            test_suggestions = None
+            
+        # Generate tests using TestGenerator
+        try:
+            from src.test_generator import TestGenerator
+            generator = TestGenerator(output_dir=tests_dir)
+            
+            # Generate tests for each language found in the repo
+            test_files = {}
+            
+            # Look for Python files
+            if any(file.endswith('.py') for file in analysis_results.get("file_types", {})):
+                logger.info("Generating Python integration tests")
+                python_tests = generator.generate_python_tests(repo_path, analysis_results, test_suggestions)
+                test_files.update(python_tests)
+                
+            # Look for JavaScript files
+            if any(file.endswith('.js') for file in analysis_results.get("file_types", {})):
+                logger.info("Generating JavaScript integration tests")
+                js_tests = generator.generate_javascript_tests(repo_path, analysis_results)
+                test_files.update(js_tests)
+                
+            # Look for Java files
+            if any(file.endswith('.java') for file in analysis_results.get("file_types", {})):
+                logger.info("Generating Java integration tests")
+                java_tests = generator.generate_java_tests(repo_path, analysis_results)
+                test_files.update(java_tests)
+                
+            # Generate tests from model suggestions if available
+            if test_suggestions:
+                logger.info("Generating tests from model suggestions")
+                suggestion_tests = generator.generate_from_suggestions(repo_path, test_suggestions)
+                test_files.update(suggestion_tests)
+                
+            logger.info(f"Generated {len(test_files)} test files in {tests_dir}")
+            
+        except Exception as e:
+            logger.error(f"Error generating tests with TestGenerator: {e}")
+            
+            # Fallback to simple template test file
+            test_file = os.path.join(tests_dir, "test_integration.py")
+            
+            with open(test_file, 'w') as f:
+                f.write("""
 import unittest
 
 class IntegrationTest(unittest.TestCase):
@@ -162,8 +212,8 @@ class IntegrationTest(unittest.TestCase):
 if __name__ == '__main__':
     unittest.main()
 """)
+            logger.info(f"Created fallback test file at {test_file}")
         
-        logger.info(f"Created test file at {test_file}")
         return tests_dir
     
     def run(self, repo_url):
@@ -195,10 +245,59 @@ if __name__ == '__main__':
             for key, value in analysis_results.items():
                 f.write(f"{key}: {value}\n")
         
+        # Save a summary report
+        summary_file = os.path.join(self.output_dir, "summary_report.md")
+        with open(summary_file, 'w') as f:
+            f.write(f"# Code Review and Test Generation Report\n\n")
+            f.write(f"Repository: {repo_url}\n\n")
+            
+            f.write("## Analysis Summary\n\n")
+            if "summary" in analysis_results:
+                f.write(f"{analysis_results['summary']}\n\n")
+            
+            if "file_types" in analysis_results:
+                f.write("### File Types\n\n")
+                for file_type, count in analysis_results.get("file_types", {}).items():
+                    f.write(f"- {file_type}: {count} files\n")
+                f.write("\n")
+            
+            f.write(f"Total Files Analyzed: {analysis_results.get('total_files', 0)}\n")
+            f.write(f"Total Lines of Code: {analysis_results.get('total_lines', 0)}\n\n")
+            
+            f.write("## Top Recommendations\n\n")
+            if "recommendations" in analysis_results:
+                for i, rec in enumerate(analysis_results["recommendations"][:10], 1):
+                    f.write(f"{i}. {rec}\n")
+                
+            f.write("\n## Generated Tests\n\n")
+            f.write(f"Integration tests have been generated in: {tests_path}\n\n")
+            
+            f.write("### Test Files\n\n")
+            if os.path.exists(tests_path):
+                for root, dirs, files in os.walk(tests_path):
+                    rel_path = os.path.relpath(root, tests_path)
+                    if rel_path != ".":
+                        f.write(f"**{rel_path}**\n\n")
+                    
+                    for file in files:
+                        if rel_path == ".":
+                            f.write(f"- {file}\n")
+                        else:
+                            f.write(f"- {os.path.join(rel_path, file)}\n")
+            
+            f.write("\n## Next Steps\n\n")
+            f.write("1. Review the generated test files and implement the actual test logic\n")
+            f.write("2. Integrate the tests into your project's test suite\n")
+            f.write("3. Run the tests and fix any failing tests\n")
+            f.write("4. Add more tests for uncovered code paths\n")
+        
+        logger.info(f"Generated summary report at {summary_file}")
+        
         return {
             "repository": repo_url,
             "repo_path": repo_path,
             "analysis_file": analysis_file,
+            "summary_file": summary_file,
             "tests_path": tests_path,
             "analysis_results": analysis_results
         }
