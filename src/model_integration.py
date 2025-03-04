@@ -36,14 +36,35 @@ class ModelIntegration:
             True if model loaded successfully, False otherwise
         """
         try:
+            print(f"DEBUG: Attempting to load model from {self.model_path}")
+            print(f"DEBUG: Path exists: {os.path.exists(self.model_path)}")
+            print(f"DEBUG: Path is directory: {os.path.isdir(self.model_path)}")
+            
+            # List all files in the model path to debug
+            if os.path.isdir(self.model_path):
+                print(f"DEBUG: Directory contents of {self.model_path}:")
+                for file in os.listdir(self.model_path):
+                    print(f"DEBUG:   - {file}")
+                    
             # Check if we have a GGUF file (for llama.cpp)
             gguf_files = list(Path(self.model_path).glob("*.gguf"))
+            print(f"DEBUG: Found GGUF files: {gguf_files}")
+            
             if gguf_files:
+                print(f"DEBUG: Using llama.cpp model: {gguf_files[0]}")
                 return self._load_llama_cpp_model(gguf_files[0])
             else:
+                print(f"DEBUG: No GGUF files found, trying transformers model")
+                if os.path.isdir(self.model_path):
+                    config_file = os.path.join(self.model_path, "config.json")
+                    if os.path.exists(config_file):
+                        print(f"DEBUG: Found config.json, looks like a HuggingFace model")
+                    else:
+                        print(f"DEBUG: No config.json found, might not be a valid HuggingFace model")
                 return self._load_transformers_model()
                 
         except Exception as e:
+            print(f"DEBUG: Error in load_model: {e}")
             logger.error(f"Failed to load model: {e}")
             return False
             
@@ -81,21 +102,36 @@ class ModelIntegration:
         """Load model using llama.cpp Python bindings."""
         try:
             logger.info(f"Loading llama.cpp model from {model_path}")
+            print(f"DEBUG: Attempting to load GGUF model: {model_path}")
+            
             try:
+                print("DEBUG: Importing llama_cpp module...")
                 from llama_cpp import Llama
-            except ImportError:
-                logger.error("llama-cpp-python not installed")
-                logger.error("Please install it: pip install llama-cpp-python")
+                print("DEBUG: Successfully imported llama_cpp")
+            except ImportError as e:
+                error_message = f"llama-cpp-python not installed or error during import: {str(e)}"
+                logger.error(error_message)
+                print(f"DEBUG: {error_message}")
+                print("DEBUG: Please install it: pip install llama-cpp-python")
                 return False
                 
             # Load the model
             logger.info("Loading model (this may take a while)...")
-            self._model = Llama(
-                model_path=str(model_path),
-                n_ctx=4096,  # Context window size
-                n_threads=os.cpu_count(),  # Use all CPU cores
-                verbose=False
-            )
+            print(f"DEBUG: Creating Llama instance with model_path={model_path}")
+            print(f"DEBUG: Model file exists: {os.path.exists(model_path)}")
+            print(f"DEBUG: Model file size: {os.path.getsize(model_path) / (1024*1024):.2f} MB")
+            
+            try:
+                self._model = Llama(
+                    model_path=str(model_path),
+                    n_ctx=4096,  # Context window size
+                    n_threads=os.cpu_count(),  # Use all CPU cores
+                    verbose=False
+                )
+                print("DEBUG: Llama model instance created successfully")
+            except Exception as e:
+                print(f"DEBUG: Error creating Llama instance: {str(e)}")
+                raise
             
             # Create a simple tokenizer for llama-cpp that mimics HF tokenizer interface
             class LlamaCppTokenizer:
@@ -115,9 +151,21 @@ class ModelIntegration:
             self._tokenizer = LlamaCppTokenizer(self._model)
             self._model_type = 'llama_cpp'
             logger.info("llama.cpp model loaded successfully")
+            print("DEBUG: LlamaCppTokenizer created and model_type set to 'llama_cpp'")
+            
+            # Test the model with a simple prompt
+            print("DEBUG: Testing model with a simple prompt...")
+            try:
+                test_result = self._model.create_completion("Say hello:", max_tokens=10)
+                print(f"DEBUG: Test completion result: {test_result}")
+            except Exception as e:
+                print(f"DEBUG: Error during test completion: {str(e)}")
+                
             return True
         except Exception as e:
-            logger.error(f"Failed to load llama.cpp model: {e}")
+            error_message = f"Failed to load llama.cpp model: {str(e)}"
+            logger.error(error_message)
+            print(f"DEBUG: {error_message}")
             return False
             
     def analyze_file(self, file_path):
@@ -130,8 +178,14 @@ class ModelIntegration:
         Returns:
             Analysis results for the file
         """
+        print(f"DEBUG: analyze_file called for {file_path}")
+        print(f"DEBUG: Model loaded: {self._model is not None}")
+        print(f"DEBUG: Model type: {self._model_type}")
+        
         if not self._model:
+            print("DEBUG: Model not loaded, attempting to load it now")
             if not self.load_model():
+                print("DEBUG: Failed to load model, will use mock analysis")
                 return {"error": "Failed to load model"}
                 
         try:
@@ -145,6 +199,7 @@ class ModelIntegration:
                 "file_type": Path(file_path).suffix,
                 "filename": Path(file_path).name
             }
+            print(f"DEBUG: File stats: {file_stats}")
             
             # Prepare the prompt for code analysis
             prompt = f"""
@@ -162,6 +217,7 @@ class ModelIntegration:
             # Check which model type to use
             if self._model_type == 'hf':
                 # HuggingFace model
+                print(f"DEBUG: Using HuggingFace model for {file_path}")
                 logger.info(f"Analyzing {file_path} using HuggingFace model")
                 
                 # Tokenize the prompt
@@ -180,26 +236,36 @@ class ModelIntegration:
                 
                 # Decode the generated text
                 generated_text = self._tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+                print(f"DEBUG: HuggingFace model generated text length: {len(generated_text)}")
                 
             elif self._model_type == 'llama_cpp':
                 # llama.cpp model
+                print(f"DEBUG: Using llama.cpp model for {file_path}")
                 logger.info(f"Analyzing {file_path} using llama.cpp model")
                 
                 # Generate the analysis using llama-cpp's API
-                result = self._model.create_completion(
-                    prompt.strip(),
-                    max_tokens=500,
-                    temperature=0.7,
-                    top_p=0.95,
-                    stop=["```"],
-                    echo=False
-                )
-                
-                # Extract the generated text
-                generated_text = result['choices'][0]['text']
+                try:
+                    print("DEBUG: Calling llama_cpp create_completion")
+                    result = self._model.create_completion(
+                        prompt.strip(),
+                        max_tokens=500,
+                        temperature=0.7,
+                        top_p=0.95,
+                        stop=["```"],
+                        echo=False
+                    )
+                    print(f"DEBUG: llama_cpp create_completion result: {result}")
+                    
+                    # Extract the generated text
+                    generated_text = result['choices'][0]['text']
+                    print(f"DEBUG: llama_cpp generated text length: {len(generated_text)}")
+                except Exception as e:
+                    print(f"DEBUG: Error in llama_cpp create_completion: {str(e)}")
+                    raise
                 
             else:
                 # Fallback to mock analysis
+                print(f"DEBUG: No valid model type ({self._model_type}), using mock analysis")
                 logger.info(f"Using mock analysis for {file_path} (no model available)")
                 analysis = {
                     "file": str(file_path),
