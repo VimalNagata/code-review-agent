@@ -475,7 +475,8 @@ class CodeGraph:
             file_path_str = str(file_path)
             
             # Skip files in .git, venv, etc.
-            if any(part.startswith(('.', 'venv', 'node_modules')) 
+            excluded_dirs = {'.git', '.venv', 'venv', 'node_modules', '__pycache__'}
+            if any((part in excluded_dirs or (part.startswith('.') and len(part) > 1))
                   for part in file_path_str.split(os.sep)):
                 continue
             
