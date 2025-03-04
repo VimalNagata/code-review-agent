@@ -2,7 +2,6 @@
 Module for integrating with local AI models for code analysis.
 """
 import os
-import json
 import logging
 from pathlib import Path
 import torch  # Required for model inference

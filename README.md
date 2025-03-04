@@ -1,20 +1,23 @@
 # Code Review and Integration Test Agent
 
-An agent that downloads a git repository, reviews the code using a locally downloaded model, and generates integration test cases.
+An agent that downloads a git repository, reviews the code using a locally downloaded LLM, and generates integration test cases for Python, JavaScript, and Java codebases.
 
 ## Features
 
-- Download and analyze git repositories
-- Analyze code using a local AI model
-- Generate integration tests based on code analysis
-- Support for Python and JavaScript codebases
-- Detailed code recommendations
+- Downloads and analyzes git repositories
+- Uses StarCoder or other local LLMs for code review
+- Generates language-specific integration tests:
+  - Python tests using pytest
+  - JavaScript tests using Jest
+  - Java tests using JUnit 5 and Mockito
+- Provides detailed code recommendations and test suggestions
+- Creates comprehensive summary reports
 
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/code-review-agent.git
+git clone https://github.com/VimalNagata/code-review-agent.git
 cd code-review-agent
 
 # Install the package
@@ -27,29 +30,41 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-# Basic usage with default model path
-python -m src https://github.com/example/repo-to-analyze.git
+# Basic usage (without model, uses mock analysis)
+python -m src https://github.com/username/repo-to-analyze.git
 
-# Specify a local model
-python -m src https://github.com/example/repo-to-analyze.git --model /path/to/your/model
+# With a local model
+python -m src https://github.com/username/repo-to-analyze.git --model ./model
 
 # Specify output directory
-python -m src https://github.com/example/repo-to-analyze.git --output ./output-dir
+python -m src https://github.com/username/repo-to-analyze.git --output ./my-output-dir
+
+# Enable verbose output
+python -m src https://github.com/username/repo-to-analyze.git -v
 ```
+
+## Model Setup
+
+The agent works best with code-specialized LLMs. See `model/DOWNLOAD_INSTRUCTIONS.md` for details on downloading and setting up:
+
+- StarCoder
+- StarCoder2-1B (lighter alternative)
+- Other compatible Hugging Face models
 
 ## Components
 
-- **CodeReviewAgent**: Main agent that coordinates downloading and analyzing repositories
-- **ModelIntegration**: Handles integration with local AI models
-- **TestGenerator**: Generates integration tests based on analysis
+- **CodeReviewAgent**: Main agent that coordinates repository analysis and test generation
+- **ModelIntegration**: Integrates with local LLMs for code analysis and test suggestions
+- **TestGenerator**: Generates language-specific integration tests
 
 ## Output
 
-The agent generates the following outputs:
+The agent generates:
 
-- Code analysis report
-- Integration test files
-- Test recommendations
+- Summary report in Markdown format
+- Detailed code analysis
+- Language-specific integration tests
+- Test recommendations based on code patterns
 
 ## Testing
 

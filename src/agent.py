@@ -8,6 +8,7 @@ import tempfile
 import subprocess
 from pathlib import Path
 import logging
+import sys
 
 # Set up logging
 logging.basicConfig(
@@ -308,17 +309,47 @@ def main():
     parser.add_argument("repo_url", help="URL of the git repository to analyze")
     parser.add_argument("--model", help="Path to the local model", default=None)
     parser.add_argument("--output", help="Output directory", default=None)
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
     
     args = parser.parse_args()
     
-    agent = CodeReviewAgent(model_path=args.model, output_dir=args.output)
-    results = agent.run(args.repo_url)
+    # Set logging level based on verbose flag
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("Verbose mode enabled")
     
-    print("\nAgent completed successfully!")
-    print(f"Repository: {results['repository']}")
-    print(f"Repository cloned to: {results['repo_path']}")
-    print(f"Analysis saved to: {results['analysis_file']}")
-    print(f"Integration tests generated at: {results['tests_path']}")
+    try:
+        print(f"Starting code review and test generation for {args.repo_url}...")
+        
+        # Check if model path is valid
+        if args.model and not os.path.exists(args.model):
+            print(f"Warning: Model path {args.model} does not exist.")
+            if input("Continue without model? (y/n): ").lower() != 'y':
+                sys.exit(1)
+        
+        # Create agent and run
+        agent = CodeReviewAgent(model_path=args.model, output_dir=args.output)
+        results = agent.run(args.repo_url)
+        
+        # Print results
+        print("\n✅ Agent completed successfully!")
+        print(f"Repository: {results['repository']}")
+        print(f"Repository cloned to: {results['repo_path']}")
+        print(f"Analysis saved to: {results['analysis_file']}")
+        print(f"Summary report: {results.get('summary_file', 'N/A')}")
+        print(f"Integration tests generated at: {results['tests_path']}")
+        
+        print("\nTo view the results:")
+        print(f"  - Open {results.get('summary_file', results['analysis_file'])} for the analysis summary")
+        print(f"  - Browse {results['tests_path']} for the generated test files")
+    
+    except KeyboardInterrupt:
+        print("\n\nOperation cancelled by user.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        logger.exception("An unexpected error occurred")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
